@@ -54,7 +54,7 @@ class IWFWorldRecordsScraper:
         # Environment variables
         self.supabase_url = os.getenv('SUPABASE_URL')
         self.supabase_key = os.getenv('SUPABASE_KEY')
-        self.discord_webhook = os.getenv('DISCORD_WEBHOOK_URL')
+        self.discord_webhook = os.getenv('DISCORD_WORLDRECORDS_WEBHOOK_URL')
         
         # Dry run mode
         self.dry_run = dry_run
