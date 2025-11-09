@@ -54,7 +54,7 @@ class IWFWorldRecordsScraper:
         # Environment variables
         self.supabase_url = os.getenv('SUPABASE_URL')
         self.supabase_key = os.getenv('SUPABASE_KEY')
-        self.discord_webhook = os.getenv('DISCORD_WORLDRECORDS_WEBHOOK_URL')
+        self.slack_webhook = os.getenv('SLACK_WEBHOOK_URL')
         
         # Dry run mode
         self.dry_run = dry_run
@@ -355,62 +355,102 @@ class IWFWorldRecordsScraper:
         except Exception as e:
             return {"status": "error", "message": f"Supabase error: {str(e)}"}
     
-    def send_discord_notification(self, records_count: int, upsert_result: Dict) -> bool:
-        """Send Discord notification with results"""
-        if not self.discord_webhook:
-            print("⚠️  Discord webhook not configured")
+    def send_slack_notification(self, records_count: int, upsert_result: Dict) -> bool:
+        """Send Slack notification with results"""
+        if not self.slack_webhook:
+            print("⚠️  Slack webhook not configured")
             return False
         
         # Don't send notifications in dry run mode
         if self.dry_run:
-            print("⚠️  Skipping Discord notification in dry run mode")
+            print("⚠️  Skipping Slack notification in dry run mode")
             return False
         
         try:
             success = upsert_result.get('status') == 'success'
             
             if success:
-                title = "✅ IWF World Records Updated Successfully"
-                description = "Daily world records scrape completed."
-                color = 0x00ff00  # Green
+                emoji = "✅"
+                title = "IWF World Records Updated Successfully"
+                color = "#36a64f"  # Green
             else:
-                title = "⚠️ IWF World Records Update Issue"
-                description = upsert_result.get('message', 'Unknown error')
-                color = 0xffa500  # Orange
+                emoji = "⚠️"
+                title = "IWF World Records Update Issue"
+                color = "#ff9900"  # Orange
             
-            embed = {
-                "title": title,
-                "description": description,
-                "color": color,
-                "timestamp": datetime.utcnow().isoformat(),
-                "fields": [
+            # Get change details if available
+            changes = upsert_result.get('changes', {})
+            new_count = len(changes.get('new', [])) if changes else 0
+            modified_count = len(changes.get('modified', [])) if changes else 0
+            
+            # Build Slack message with blocks
+            blocks = [
+                {
+                    "type": "header",
+                    "text": {
+                        "type": "plain_text",
+                        "text": f"{emoji} {title}",
+                        "emoji": True
+                    }
+                },
+                {
+                    "type": "section",
+                    "fields": [
+                        {
+                            "type": "mrkdwn",
+                            "text": f"*Records Scraped:*\n{records_count}"
+                        },
+                        {
+                            "type": "mrkdwn",
+                            "text": f"*Records Upserted:*\n{upsert_result.get('records_upserted', 0)}"
+                        },
+                        {
+                            "type": "mrkdwn",
+                            "text": f"*New Records:*\n{new_count}"
+                        },
+                        {
+                            "type": "mrkdwn",
+                            "text": f"*Modified Records:*\n{modified_count}"
+                        }
+                    ]
+                },
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*Status:* {upsert_result.get('message', 'Unknown')}"
+                    }
+                },
+                {
+                    "type": "context",
+                    "elements": [
+                        {
+                            "type": "mrkdwn",
+                            "text": f"<!date^{int(datetime.utcnow().timestamp())}^{{date_num}} {{time_secs}}|{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}>"
+                        }
+                    ]
+                }
+            ]
+            
+            # Add attachment for color bar
+            data = {
+                "blocks": blocks,
+                "attachments": [
                     {
-                        "name": "Records Scraped",
-                        "value": str(records_count),
-                        "inline": True
-                    },
-                    {
-                        "name": "Records Upserted",
-                        "value": str(upsert_result.get('records_upserted', 0)),
-                        "inline": True
-                    },
-                    {
-                        "name": "Status",
-                        "value": upsert_result.get('message', 'Unknown'),
-                        "inline": False
+                        "color": color,
+                        "fallback": title
                     }
                 ]
             }
             
-            data = {"embeds": [embed]}
-            response = requests.post(self.discord_webhook, json=data)
+            response = requests.post(self.slack_webhook, json=data)
             response.raise_for_status()
             
-            print("✅ Discord notification sent")
+            print("✅ Slack notification sent")
             return True
             
         except Exception as e:
-            print(f"❌ Discord notification failed: {e}")
+            print(f"❌ Slack notification failed: {e}")
             return False
     
     def run_pipeline(self) -> int:
@@ -475,9 +515,9 @@ class IWFWorldRecordsScraper:
             
             step_num += 1
             
-            # Step 4: Send Discord notification
-            print(f"\n[{step_num}/{total_steps}] Sending Discord notification...")
-            self.send_discord_notification(len(records), upsert_result)
+            # Step 4: Send Slack notification
+            print(f"\n[{step_num}/{total_steps}] Sending Slack notification...")
+            self.send_slack_notification(len(records), upsert_result)
         
         # Summary
         print("\n" + "=" * 60)
