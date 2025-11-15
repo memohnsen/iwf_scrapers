@@ -369,78 +369,74 @@ class IWFWorldRecordsScraper:
         try:
             success = upsert_result.get('status') == 'success'
             
-            if success:
-                emoji = "✅"
-                title = "IWF World Records Updated Successfully"
-                color = "#36a64f"  # Green
-            else:
-                emoji = "⚠️"
-                title = "IWF World Records Update Issue"
-                color = "#ff9900"  # Orange
-            
-            # Get change details if available
-            changes = upsert_result.get('changes', {})
-            new_count = len(changes.get('new', [])) if changes else 0
-            modified_count = len(changes.get('modified', [])) if changes else 0
-            
-            # Build Slack message with blocks
-            blocks = [
-                {
-                    "type": "header",
-                    "text": {
-                        "type": "plain_text",
-                        "text": f"{emoji} {title}",
-                        "emoji": True
-                    }
-                },
-                {
-                    "type": "section",
-                    "fields": [
-                        {
-                            "type": "mrkdwn",
-                            "text": f"*Records Scraped:*\n{records_count}"
-                        },
-                        {
-                            "type": "mrkdwn",
-                            "text": f"*Records Upserted:*\n{upsert_result.get('records_upserted', 0)}"
-                        },
-                        {
-                            "type": "mrkdwn",
-                            "text": f"*New Records:*\n{new_count}"
-                        },
-                        {
-                            "type": "mrkdwn",
-                            "text": f"*Modified Records:*\n{modified_count}"
-                        }
-                    ]
-                },
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": f"*Status:* {upsert_result.get('message', 'Unknown')}"
-                    }
-                },
-                {
-                    "type": "context",
-                    "elements": [
-                        {
-                            "type": "mrkdwn",
-                            "text": f"<!date^{int(datetime.utcnow().timestamp())}^{{date_num}} {{time_secs}}|{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}>"
-                        }
-                    ]
+            if not success:
+                # Send error message
+                data = {
+                    "text": f"⚠️ IWF World Records Scraper Error\n{upsert_result.get('message', 'Unknown error')}"
                 }
-            ]
+                response = requests.post(self.slack_webhook, json=data)
+                response.raise_for_status()
+                print("✅ Slack notification sent")
+                return True
             
-            # Add attachment for color bar
+            # Get change details
+            changes = upsert_result.get('changes', {})
+            new_records = changes.get('new', [])
+            modified_records = changes.get('modified', [])
+            new_count = len(new_records)
+            modified_count = len(modified_records)
+            
+            # Build message text
+            if new_count == 0 and modified_count == 0:
+                # No changes
+                message_text = "Scraper ran successfully. No new records or updates."
+            else:
+                # Build list of updated records
+                message_lines = []
+                
+                # Summary
+                message_lines.append("Summary:\n")
+                message_lines.append(f"• {new_count} new record(s) inserted")
+                message_lines.append(f"• {modified_count} record(s) updated")
+                
+                # Updated records section
+                if modified_count > 0:
+                    message_lines.append("\n:memo: Updated Records\n")
+                    
+                    for item in modified_records:
+                        record = item['record']
+                        old = item['old']
+                        
+                        # Format: Age Category | Gender | Weight Class
+                        record_line = f"• {record['age_category']} | {record['gender']} | {record['weight_class']}"
+                        message_lines.append(record_line)
+                        
+                        # Build change details
+                        changes_list = []
+                        
+                        if old.get('snatch_record') != record.get('snatch_record'):
+                            old_val = old.get('snatch_record') or 'N/A'
+                            new_val = record.get('snatch_record') or 'N/A'
+                            changes_list.append(f"Snatch: {old_val}kg → {new_val}kg")
+                        
+                        if old.get('cj_record') != record.get('cj_record'):
+                            old_val = old.get('cj_record') or 'N/A'
+                            new_val = record.get('cj_record') or 'N/A'
+                            changes_list.append(f"C&J: {old_val}kg → {new_val}kg")
+                        
+                        if old.get('total_record') != record.get('total_record'):
+                            old_val = old.get('total_record') or 'N/A'
+                            new_val = record.get('total_record') or 'N/A'
+                            changes_list.append(f"Total: {old_val}kg → {new_val}kg")
+                        
+                        if changes_list:
+                            message_lines.append(f"  {', '.join(changes_list)}")
+                
+                message_text = "\n".join(message_lines)
+            
+            # Send to Slack
             data = {
-                "blocks": blocks,
-                "attachments": [
-                    {
-                        "color": color,
-                        "fallback": title
-                    }
-                ]
+                "text": message_text
             }
             
             response = requests.post(self.slack_webhook, json=data)
